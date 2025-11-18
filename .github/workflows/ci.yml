@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: Infrastructure CI
 
 on:
   push:
@@ -12,100 +12,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Run Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    services:
-      postgres:
-        image: postgis/postgis:16-3.4
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: parkshare_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Cache node modules
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
-
-      - name: Install dependencies
-        run: npm ci --prefer-offline --no-audit --legacy-peer-deps
-
-      - name: Run linter
-        run: npm run lint
-
-      - name: Run unit tests
-        run: npm run test:cov
-        env:
-          DATABASE_URL: postgresql://postgres:password@localhost:5432/parkshare_test
-          REDIS_HOST: localhost
-          REDIS_PORT: 6379
-          JWT_SECRET: test-secret-key
-          JWT_REFRESH_SECRET: test-refresh-secret-key
-          NODE_ENV: test
-
-      - name: Run E2E tests
-        run: npm run test:e2e
-        env:
-          DATABASE_URL: postgresql://postgres:password@localhost:5432/parkshare_test
-          REDIS_HOST: localhost
-          REDIS_PORT: 6379
-          JWT_SECRET: test-secret-key
-          JWT_REFRESH_SECRET: test-refresh-secret-key
-          NODE_ENV: test
-
-      - name: Upload coverage reports
-        uses: codecov/codecov-action@v4
-        if: always() && hashFiles('coverage/lcov.info') != ''
-        continue-on-error: true
-        with:
-          files: ./coverage/lcov.info
-          flags: unittests
-          name: codecov-umbrella
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Comment coverage on PR
-        uses: romeovs/lcov-reporter-action@v0.3.1
-        if: github.event_name == 'pull_request' && hashFiles('coverage/lcov.info') != ''
-        continue-on-error: true
-        with:
-          lcov-file: ./coverage/lcov.info
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  lint:
-    name: Code Quality
+  validate-yaml:
+    name: Validate YAML Files
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -113,90 +21,81 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
+      - name: Install yamllint
+        run: pip install yamllint
 
-      - name: Install dependencies
-        run: npm ci --prefer-offline --no-audit --legacy-peer-deps
-
-      - name: Check formatting
-        run: npm run format -- --check
-
-      - name: Run linter
-        run: npm run lint
-
-      - name: Type check
-        run: npx tsc --noEmit
-
-  security:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --prefer-offline --no-audit --legacy-peer-deps
-
-      - name: Run npm audit
-        run: npm audit --audit-level=moderate
-
-      - name: Generate audit report
+      - name: Validate YAML files
         run: |
-          npm audit --json > audit-report.json
-          cat audit-report.json
+          yamllint -c .yamllint.yml .
 
-      - name: Upload audit report
-        uses: actions/upload-artifact@v4
-        if: always() && hashFiles('audit-report.json') != ''
-        continue-on-error: true
-        with:
-          name: audit-report
-          path: audit-report.json
-          retention-days: 30
-
-  build:
-    name: Build Application
+  validate-docker:
+    name: Validate Docker Compose
     runs-on: ubuntu-latest
-    needs: [test, lint]
     timeout-minutes: 10
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --prefer-offline --no-audit --legacy-peer-deps
-
-      - name: Build application
-        run: npm run build
-
-      - name: Archive production artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
-          retention-days: 7
-
-      - name: Check build size
+      - name: Create test .env file
         run: |
-          du -sh dist/
-          echo "Build size:" >> $GITHUB_STEP_SUMMARY
-          du -h dist/ >> $GITHUB_STEP_SUMMARY
+          cat > .env << 'EOF'
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=testpassword
+          POSTGRES_DB=parkshare_test
+          REDIS_PASSWORD=testredispassword
+          JWT_SECRET=test-jwt-secret
+          JWT_REFRESH_SECRET=test-jwt-refresh-secret
+          STRIPE_SECRET_KEY=sk_test_fake
+          TWILIO_ACCOUNT_SID=test_sid
+          TWILIO_AUTH_TOKEN=test_token
+          AWS_ACCESS_KEY_ID=test_key
+          AWS_SECRET_ACCESS_KEY=test_secret
+          AWS_REGION=us-east-1
+          AWS_S3_BUCKET=test-bucket
+          EOF
+
+      - name: Validate docker-compose files
+        run: |
+          docker compose -f docker-compose.yml config > /dev/null
+          docker compose -f docker-compose.dev.yml config > /dev/null
+          docker compose -f docker-compose.prod.yml config > /dev/null
+          docker compose -f docker-compose.monitoring.yml config > /dev/null
+
+  shellcheck:
+    name: Validate Shell Scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          find . -type f -name "*.sh" -not -path "./.git/*" -exec shellcheck -e SC2086,SC2236,SC2162,SC2046 {} +
+
+  markdown-check:
+    name: Check Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for README
+        run: |
+          if [ ! -f README.md ]; then
+            echo "::error::README.md not found"
+            exit 1
+          fi
+          echo "✅ README.md found"
+
+      - name: Check markdown links
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: 'yes'
+          config-file: '.github/markdown-link-check-config.json'
+        continue-on-error: true
