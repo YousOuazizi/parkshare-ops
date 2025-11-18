@@ -1,5 +1,4 @@
 # 📊 Docker Compose - Monitoring & Observability Stack
-version: '3.9'
 
 services:
   # Prometheus - Metrics Collection

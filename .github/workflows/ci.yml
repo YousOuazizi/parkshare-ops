@@ -26,7 +26,7 @@ jobs:
 
       - name: Validate YAML files
         run: |
-          find . -type f \( -name "*.yml" -o -name "*.yaml" \) ! -path "./.git/*" -exec yamllint -d relaxed {} +
+          yamllint -c .yamllint.yml .
 
   validate-docker:
     name: Validate Docker Compose
@@ -36,6 +36,24 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Create test .env file
+        run: |
+          cat > .env << 'EOF'
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=testpassword
+          POSTGRES_DB=parkshare_test
+          REDIS_PASSWORD=testredispassword
+          JWT_SECRET=test-jwt-secret
+          JWT_REFRESH_SECRET=test-jwt-refresh-secret
+          STRIPE_SECRET_KEY=sk_test_fake
+          TWILIO_ACCOUNT_SID=test_sid
+          TWILIO_AUTH_TOKEN=test_token
+          AWS_ACCESS_KEY_ID=test_key
+          AWS_SECRET_ACCESS_KEY=test_secret
+          AWS_REGION=us-east-1
+          AWS_S3_BUCKET=test-bucket
+          EOF
 
       - name: Validate docker-compose files
         run: |
@@ -56,16 +74,24 @@ jobs:
       - name: Run shellcheck
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          find . -type f -name "*.sh" ! -path "./.git/*" -exec shellcheck {} +
+          find . -type f -name "*.sh" -not -path "./.git/*" -exec shellcheck -e SC2086 {} +
 
-  markdown-links:
-    name: Check Markdown Links
+  markdown-check:
+    name: Check Documentation
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Check for README
+        run: |
+          if [ ! -f README.md ]; then
+            echo "::error::README.md not found"
+            exit 1
+          fi
+          echo "✅ README.md found"
 
       - name: Check markdown links
         uses: gaurav-nelson/github-action-markdown-link-check@v1

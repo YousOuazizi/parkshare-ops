@@ -1,5 +1,4 @@
 # 🔧 Docker Compose - Development Environment
-version: '3.9'
 
 services:
   # PostgreSQL Database with PostGIS
