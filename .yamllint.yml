@@ -1,6 +1,9 @@
 ---
 extends: default
 
+ignore: |
+  docker/kubernetes/helm/**/templates/
+
 rules:
   line-length:
     max: 200
@@ -18,3 +21,6 @@ rules:
   comments-indentation: disable
   truthy:
     allowed-values: ['true', 'false', 'yes', 'no']
+  braces:
+    max-spaces-inside: 1
+    level: warning
